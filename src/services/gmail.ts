@@ -77,18 +77,24 @@ export function getGmailTools(
           items: { type: "string" },
           description: "Filter to messages with these label IDs (e.g. ['INBOX', 'UNREAD']).",
         },
+        pageToken: {
+          type: "string",
+          description: "Token for the next page of results (from a previous gmail_list response).",
+        },
       },
     },
     handler: async (args) => {
       const query = args.query as string | undefined;
       const maxResults = (args.maxResults as number | undefined) ?? 20;
       const labelIds = args.labelIds as string[] | undefined;
+      const pageToken = args.pageToken as string | undefined;
 
       const listRes = await gmail.users.messages.list({
         userId: "me",
         q: query,
         maxResults,
         labelIds,
+        pageToken,
       });
 
       const messageRefs = listRes.data.messages ?? [];

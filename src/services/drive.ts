@@ -6,11 +6,58 @@ import type { PermissionConfig, ToolDef } from "../types.js";
 import { hasAccess } from "../types.js";
 import {
   getAllowedFolders,
-  checkFolderAccess,
   filterByFolders,
 } from "../permissions.js";
 
 type AuthClient = InstanceType<typeof google.auth.OAuth2>;
+
+type DriveClient = ReturnType<typeof google.drive>;
+
+/**
+ * Recursively check whether a file (by ID) lives anywhere within the allowed
+ * folder trees, walking up the parent chain via the Drive API.
+ *
+ * This is the correct check for `drive_get`, `drive_download`, `drive_update`,
+ * `drive_delete`, and `drive_share` — where the file may be in a subfolder of
+ * an allowed folder, not just a direct child.
+ *
+ * @param drive       - Authenticated Drive API client
+ * @param fileId      - ID of the file or folder to check
+ * @param allowedFolders - Set of allowed root folder IDs
+ * @param visited     - (internal) cache of already-resolved IDs to prevent cycles
+ * @param depth       - (internal) recursion depth guard (max 10)
+ */
+async function isWithinAllowedFolders(
+  drive: DriveClient,
+  fileId: string,
+  allowedFolders: string[],
+  visited: Set<string> = new Set(),
+  depth = 0,
+): Promise<boolean> {
+  if (allowedFolders.length === 0) return true;
+  if (depth > 10 || visited.has(fileId)) return false;
+  visited.add(fileId);
+
+  const meta = await drive.files.get({
+    fileId,
+    fields: "parents",
+  });
+
+  const parents = meta.data.parents ?? [];
+  if (parents.length === 0) return false;
+
+  // Direct match
+  if (parents.some((p) => allowedFolders.includes(p))) return true;
+
+  // Recurse up each parent
+  for (const parentId of parents) {
+    if (await isWithinAllowedFolders(drive, parentId, allowedFolders, visited, depth + 1)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Returns an array of ToolDef objects for Google Drive, filtered by access level.
@@ -118,7 +165,9 @@ export function getDriveTools(
         fields: "id, name, mimeType, parents, modifiedTime, size",
       });
 
-      checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+      if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+        throw new Error("Item is outside allowed folders");
+      }
 
       const mimeType = meta.data.mimeType ?? "";
 
@@ -220,7 +269,9 @@ export function getDriveTools(
         fields: "id, name, mimeType, parents",
       });
 
-      checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+      if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+        throw new Error("Item is outside allowed folders");
+      }
 
       const res = await drive.files.get(
         { fileId, alt: "media" },
@@ -369,7 +420,9 @@ export function getDriveTools(
           fields: "id, name, mimeType, parents",
         });
 
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         const res = await drive.files.update({
           fileId,
@@ -412,7 +465,9 @@ export function getDriveTools(
           fields: "id, name, parents",
         });
 
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         await drive.files.update({
           fileId,
@@ -458,7 +513,9 @@ export function getDriveTools(
           fields: "id, name, parents",
         });
 
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         const res = await drive.permissions.create({
           fileId,
