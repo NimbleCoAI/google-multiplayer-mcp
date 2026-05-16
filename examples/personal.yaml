@@ -1,0 +1,13 @@
+google:
+  identity: personal
+  permissions:
+    drive:
+      access: write
+    calendar:
+      access: write
+    gmail:
+      access: read
+    docs:
+      access: write
+    sheets:
+      access: write

@@ -1,0 +1,15 @@
+google:
+  identity: frontdoor
+  permissions:
+    drive:
+      access: read
+      folders: ["REPLACE_WITH_OSINT_FOLDER_ID"]
+    calendar:
+      access: none
+    gmail:
+      access: none
+    docs:
+      access: read
+      folders: ["REPLACE_WITH_OSINT_FOLDER_ID"]
+    sheets:
+      access: read
