@@ -125,9 +125,9 @@ export function getDocsTools(
 
         const documentId = createRes.data.documentId!;
 
-        // Move to folder via Drive API
-        if (folderId) {
-          // Get current parents to remove them when adding new one
+        // Move to folder via Drive API — use specified folder or first allowed folder
+        const targetFolder = folderId ?? (allowedFolders.length > 0 ? allowedFolders[0] : null);
+        if (targetFolder) {
           const fileMeta = await drive.files.get({
             fileId: documentId,
             fields: "parents",
@@ -136,7 +136,7 @@ export function getDocsTools(
 
           await drive.files.update({
             fileId: documentId,
-            addParents: folderId,
+            addParents: targetFolder,
             removeParents: previousParents || undefined,
             fields: "id, parents",
           });

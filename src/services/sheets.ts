@@ -137,8 +137,9 @@ export function getSheetsTools(
 
         const spreadsheetId = createRes.data.spreadsheetId!;
 
-        // Move to folder via Drive API
-        if (folderId) {
+        // Move to folder via Drive API — use specified folder or first allowed folder
+        const targetFolder = folderId ?? (allowedFolders.length > 0 ? allowedFolders[0] : null);
+        if (targetFolder) {
           const fileMeta = await drive.files.get({
             fileId: spreadsheetId,
             fields: "parents",
@@ -147,7 +148,7 @@ export function getSheetsTools(
 
           await drive.files.update({
             fileId: spreadsheetId,
-            addParents: folderId,
+            addParents: targetFolder,
             removeParents: previousParents || undefined,
             fields: "id, parents",
           });
