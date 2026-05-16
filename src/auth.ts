@@ -150,7 +150,16 @@ export async function runAuthFlow(identity: string): Promise<void> {
         .then((mod) => mod.default(authUrl))
         .catch(() => {
           // Browser open failed — URL is already printed
-        });
+        })
+        // Also catch unhandled spawn errors from the open child process
+        .then((cp: any) => {
+          if (cp && typeof cp.on === "function") {
+            cp.on("error", () => {
+              // Silently ignore — URL is already printed for manual copy
+            });
+          }
+        })
+        .catch(() => {});
     });
 
     setTimeout(() => {
