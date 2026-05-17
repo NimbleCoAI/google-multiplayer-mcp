@@ -41,6 +41,7 @@ async function isWithinAllowedFolders(
   const meta = await drive.files.get({
     fileId,
     fields: "parents",
+    supportsAllDrives: true,
   });
 
   const parents = meta.data.parents ?? [];
@@ -126,6 +127,8 @@ export function getDriveTools(
         pageSize,
         pageToken,
         fields: "nextPageToken, files(id, name, mimeType, parents, modifiedTime, size)",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       const files = (res.data.files ?? []).map((f) => ({
@@ -163,6 +166,7 @@ export function getDriveTools(
       const meta = await drive.files.get({
         fileId,
         fields: "id, name, mimeType, parents, modifiedTime, size",
+        supportsAllDrives: true,
       });
 
       if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
@@ -233,6 +237,8 @@ export function getDriveTools(
         q,
         pageSize,
         fields: "files(id, name, mimeType, parents, modifiedTime, size)",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       const files = (res.data.files ?? []).map((f) => ({
@@ -267,6 +273,7 @@ export function getDriveTools(
       const meta = await drive.files.get({
         fileId,
         fields: "id, name, mimeType, parents",
+        supportsAllDrives: true,
       });
 
       if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
@@ -274,7 +281,7 @@ export function getDriveTools(
       }
 
       const res = await drive.files.get(
-        { fileId, alt: "media" },
+        { fileId, alt: "media", supportsAllDrives: true },
         { responseType: "arraybuffer" },
       );
 
@@ -339,6 +346,7 @@ export function getDriveTools(
             body: Readable.from([content]),
           },
           fields: "id, name, mimeType, parents",
+          supportsAllDrives: true,
         });
 
         return res.data;
@@ -382,6 +390,7 @@ export function getDriveTools(
         const res = await drive.files.create({
           requestBody,
           fields: "id, name, mimeType, parents",
+          supportsAllDrives: true,
         });
 
         return res.data;
@@ -420,6 +429,7 @@ export function getDriveTools(
         const meta = await drive.files.get({
           fileId,
           fields: "id, name, mimeType, parents",
+          supportsAllDrives: true,
         });
 
         if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
@@ -433,6 +443,7 @@ export function getDriveTools(
             body: Readable.from([content]),
           },
           fields: "id, name, mimeType, parents, modifiedTime",
+          supportsAllDrives: true,
         });
 
         return res.data;
@@ -465,6 +476,7 @@ export function getDriveTools(
         const meta = await drive.files.get({
           fileId,
           fields: "id, name, parents",
+          supportsAllDrives: true,
         });
 
         if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
@@ -474,6 +486,7 @@ export function getDriveTools(
         await drive.files.update({
           fileId,
           requestBody: { trashed: true },
+          supportsAllDrives: true,
         });
 
         return { success: true, fileId };
@@ -513,6 +526,7 @@ export function getDriveTools(
         const meta = await drive.files.get({
           fileId,
           fields: "id, name, parents",
+          supportsAllDrives: true,
         });
 
         if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
@@ -527,6 +541,7 @@ export function getDriveTools(
             emailAddress: email,
           },
           fields: "id, role, emailAddress",
+          supportsAllDrives: true,
         });
 
         return res.data;

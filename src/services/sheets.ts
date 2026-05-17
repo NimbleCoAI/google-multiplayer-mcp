@@ -54,6 +54,7 @@ export function getSheetsTools(
       const meta = await drive.files.get({
         fileId: spreadsheetId,
         fields: "id, name, parents",
+        supportsAllDrives: true,
       });
 
       checkFolderAccess(meta.data.parents ?? [], allowedFolders);
@@ -143,6 +144,7 @@ export function getSheetsTools(
           const fileMeta = await drive.files.get({
             fileId: spreadsheetId,
             fields: "parents",
+            supportsAllDrives: true,
           });
           const previousParents = (fileMeta.data.parents ?? []).join(",");
 
@@ -151,6 +153,7 @@ export function getSheetsTools(
             addParents: targetFolder,
             removeParents: previousParents || undefined,
             fields: "id, parents",
+            supportsAllDrives: true,
           });
         }
 
@@ -210,6 +213,7 @@ export function getSheetsTools(
         const meta = await drive.files.get({
           fileId: spreadsheetId,
           fields: "id, name, parents",
+          supportsAllDrives: true,
         });
 
         checkFolderAccess(meta.data.parents ?? [], allowedFolders);
@@ -257,6 +261,7 @@ export function getSheetsTools(
         const meta = await drive.files.get({
           fileId: spreadsheetId,
           fields: "id, name, parents",
+          supportsAllDrives: true,
         });
 
         checkFolderAccess(meta.data.parents ?? [], allowedFolders);
@@ -264,6 +269,7 @@ export function getSheetsTools(
         await drive.files.update({
           fileId: spreadsheetId,
           requestBody: { trashed: true },
+          supportsAllDrives: true,
         });
 
         return { success: true, spreadsheetId };
