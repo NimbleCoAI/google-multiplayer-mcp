@@ -142,8 +142,8 @@ export async function runAuthFlow(identity: string): Promise<void> {
       }
     });
 
-    server.listen(REDIRECT_PORT, () => {
-      console.log(`Listening on port ${REDIRECT_PORT} for OAuth callback...`);
+    server.listen(REDIRECT_PORT, "0.0.0.0", () => {
+      console.log(`Listening on 0.0.0.0:${REDIRECT_PORT} for OAuth callback...`);
       console.log(`\nOpen this URL in your browser:\n\n  ${authUrl}\n`);
 
       import("open")
@@ -176,6 +176,172 @@ export async function runAuthFlow(identity: string): Promise<void> {
   const oauth2 = google.oauth2({ version: "v2", auth: client });
   const userInfo = await oauth2.userinfo.get();
   console.log(`\nConnected as ${userInfo.data.email ?? "unknown"}`);
+}
+
+/** In-flight headless auth state, keyed by identity. */
+const pendingAuth = new Map<
+  string,
+  { resolve: (v: "ok") => void; reject: (e: Error) => void }
+>();
+
+/**
+ * Run an OAuth flow without opening a browser.
+ *
+ * Prints a structured `AUTH_REQUIRED:` line to stdout so a calling process
+ * (e.g. an MCP client or Hermes agent) can parse the URL and present it to
+ * the user.  The callback server binds to 0.0.0.0 so it is reachable when
+ * port-published from a Docker container.
+ */
+export async function runHeadlessAuthFlow(identity: string): Promise<void> {
+  const config = loadGlobalConfig();
+  const client = new google.auth.OAuth2(
+    config.clientId,
+    config.clientSecret,
+    REDIRECT_URI,
+  );
+
+  const authUrl = client.generateAuthUrl({
+    access_type: "offline",
+    scope: SCOPES,
+    prompt: "consent",
+  });
+
+  // Structured line for machine parsing
+  console.log(`AUTH_REQUIRED: Open this URL to authenticate: ${authUrl}`);
+
+  const code = await new Promise<string>((resolve, reject) => {
+    const server = createServer((req, res) => {
+      const url = new URL(req.url ?? "/", `http://localhost:${REDIRECT_PORT}`);
+      if (url.pathname === "/callback") {
+        const code = url.searchParams.get("code");
+        if (code) {
+          res.writeHead(200, { "Content-Type": "text/html" });
+          res.end(
+            "<html><body><h2>Authenticated! You can close this tab.</h2></body></html>",
+          );
+          server.close();
+          resolve(code);
+        } else {
+          const error = url.searchParams.get("error") ?? "No code received";
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end(`<html><body><h2>Error: ${error}</h2></body></html>`);
+          server.close();
+          reject(new Error(error));
+        }
+      }
+    });
+
+    // Bind to 0.0.0.0 so Docker-published ports are reachable from the host
+    server.listen(REDIRECT_PORT, "0.0.0.0", () => {
+      console.error(
+        `Listening on 0.0.0.0:${REDIRECT_PORT} for OAuth callback...`,
+      );
+    });
+
+    setTimeout(() => {
+      server.close();
+      reject(new Error("OAuth callback timed out after 5 minutes"));
+    }, 300_000);
+  });
+
+  const { tokens } = await client.getToken(code);
+  saveTokens(identity, tokens as TokenSet);
+
+  // Get user email for confirmation
+  client.setCredentials(tokens);
+  const oauth2 = google.oauth2({ version: "v2", auth: client });
+  const userInfo = await oauth2.userinfo.get();
+  console.log(`\nConnected as ${userInfo.data.email ?? "unknown"}`);
+}
+
+// ─── MCP tool helpers ─────────────────────────────────────────────
+
+/**
+ * Start a headless auth flow in the background and return the URL immediately.
+ * The caller (an MCP tool handler) can return the URL to the agent while the
+ * callback server waits for the redirect.
+ */
+export function startHeadlessAuth(identity: string): {
+  authUrl: string;
+  done: Promise<"ok">;
+} {
+  const config = loadGlobalConfig();
+  const client = new google.auth.OAuth2(
+    config.clientId,
+    config.clientSecret,
+    REDIRECT_URI,
+  );
+
+  const authUrl = client.generateAuthUrl({
+    access_type: "offline",
+    scope: SCOPES,
+    prompt: "consent",
+  });
+
+  const done = new Promise<"ok">((resolve, reject) => {
+    // Track for status polling
+    pendingAuth.set(identity, { resolve, reject });
+
+    const server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", `http://localhost:${REDIRECT_PORT}`);
+      if (url.pathname === "/callback") {
+        const code = url.searchParams.get("code");
+        if (code) {
+          res.writeHead(200, { "Content-Type": "text/html" });
+          res.end(
+            "<html><body><h2>Authenticated! You can close this tab.</h2></body></html>",
+          );
+          server.close();
+          try {
+            const { tokens } = await client.getToken(code);
+            saveTokens(identity, tokens as TokenSet);
+            client.setCredentials(tokens);
+            pendingAuth.delete(identity);
+            resolve("ok");
+          } catch (err) {
+            pendingAuth.delete(identity);
+            reject(err instanceof Error ? err : new Error(String(err)));
+          }
+        } else {
+          const error = url.searchParams.get("error") ?? "No code received";
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end(`<html><body><h2>Error: ${error}</h2></body></html>`);
+          server.close();
+          pendingAuth.delete(identity);
+          reject(new Error(error));
+        }
+      }
+    });
+
+    server.listen(REDIRECT_PORT, "0.0.0.0", () => {
+      console.error(
+        `google-mcp: auth callback listening on 0.0.0.0:${REDIRECT_PORT}`,
+      );
+    });
+
+    setTimeout(() => {
+      server.close();
+      pendingAuth.delete(identity);
+      reject(new Error("OAuth callback timed out after 5 minutes"));
+    }, 300_000);
+  });
+
+  return { authUrl, done };
+}
+
+/**
+ * Check whether an identity has valid tokens.
+ * Returns `"authenticated"` if a refresh token exists,
+ * `"pending"` if an auth flow is in progress,
+ * or `"unauthenticated"` otherwise.
+ */
+export function checkAuthStatus(
+  identity: string,
+): "authenticated" | "pending" | "unauthenticated" {
+  const tokens = loadTokens(identity);
+  if (tokens?.refresh_token) return "authenticated";
+  if (pendingAuth.has(identity)) return "pending";
+  return "unauthenticated";
 }
 
 /** Print auth status for all known identities. */
