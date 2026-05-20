@@ -3,7 +3,7 @@
 /** Entry point — auth CLI or MCP server mode. */
 
 import { readFileSync } from "fs";
-import { runAuthFlow, printAuthStatus } from "./auth.js";
+import { runAuthFlow, runHeadlessAuthFlow, printAuthStatus } from "./auth.js";
 import { loadPermissionConfig } from "./permissions.js";
 import { startServer } from "./server.js";
 
@@ -20,13 +20,24 @@ async function main() {
     return;
   }
 
+  // Headless auth — no browser open, prints URL for machine parsing
+  if (args[0] === "auth-headless") {
+    if (!args[1]) {
+      console.error("Usage: google-mcp auth-headless <identity>");
+      process.exit(1);
+    }
+    await runHeadlessAuthFlow(args[1]);
+    return;
+  }
+
   // Server mode: google-mcp --config <path>
   const configIndex = args.indexOf("--config");
   if (configIndex === -1 || !args[configIndex + 1]) {
     console.error("Usage:");
-    console.error("  google-mcp auth <identity>    Run OAuth flow for an identity");
-    console.error("  google-mcp auth status         Show auth status for all identities");
-    console.error("  google-mcp --config <path>    Start MCP server with permission config");
+    console.error("  google-mcp auth <identity>           Run OAuth flow (opens browser)");
+    console.error("  google-mcp auth-headless <identity>  Run OAuth flow (prints URL, no browser)");
+    console.error("  google-mcp auth status               Show auth status for all identities");
+    console.error("  google-mcp --config <path>           Start MCP server with permission config");
     process.exit(1);
   }
 
