@@ -19,8 +19,15 @@ const SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
 ];
 
-const REDIRECT_PORT = 8095;
-const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/callback`;
+const REDIRECT_PORT = parseInt(process.env.GOOGLE_AUTH_PORT ?? "8095", 10);
+/**
+ * Allow overriding the redirect URI for remote setups (e.g. SSH into a Mac Mini
+ * where the callback server runs on the remote host but the browser is local).
+ * Set GOOGLE_AUTH_HOST to the hostname/IP reachable from the browser.
+ * Defaults to "localhost" for local dev.
+ */
+const REDIRECT_HOST = process.env.GOOGLE_AUTH_HOST ?? "localhost";
+const REDIRECT_URI = `http://${REDIRECT_HOST}:${REDIRECT_PORT}/callback`;
 
 /** Load global config (client ID/secret). */
 function loadGlobalConfig(): GlobalConfig {
@@ -142,8 +149,27 @@ export async function runAuthFlow(identity: string): Promise<void> {
       }
     });
 
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        reject(
+          new Error(
+            `Port ${REDIRECT_PORT} is already in use. ` +
+              `Kill the process using it or set GOOGLE_AUTH_PORT to a different port.`,
+          ),
+        );
+      } else {
+        reject(err);
+      }
+    });
+
     server.listen(REDIRECT_PORT, "0.0.0.0", () => {
-      console.log(`Listening on 0.0.0.0:${REDIRECT_PORT} for OAuth callback...`);
+      console.log(`Callback server listening on 0.0.0.0:${REDIRECT_PORT}`);
+      console.log(`Redirect URI: ${REDIRECT_URI}`);
+      if (REDIRECT_HOST !== "localhost") {
+        console.log(
+          `(Using custom host "${REDIRECT_HOST}" — ensure Google OAuth redirect URIs include ${REDIRECT_URI})`,
+        );
+      }
       console.log(`\nOpen this URL in your browser:\n\n  ${authUrl}\n`);
 
       import("open")
@@ -231,10 +257,23 @@ export async function runHeadlessAuthFlow(identity: string): Promise<void> {
       }
     });
 
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        reject(
+          new Error(
+            `Port ${REDIRECT_PORT} is already in use. ` +
+              `Kill the process using it or set GOOGLE_AUTH_PORT to a different port.`,
+          ),
+        );
+      } else {
+        reject(err);
+      }
+    });
+
     // Bind to 0.0.0.0 so Docker-published ports are reachable from the host
     server.listen(REDIRECT_PORT, "0.0.0.0", () => {
       console.error(
-        `Listening on 0.0.0.0:${REDIRECT_PORT} for OAuth callback...`,
+        `Callback server listening on 0.0.0.0:${REDIRECT_PORT} (redirect URI: ${REDIRECT_URI})`,
       );
     });
 
@@ -313,9 +352,23 @@ export function startHeadlessAuth(identity: string): {
       }
     });
 
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      pendingAuth.delete(identity);
+      if (err.code === "EADDRINUSE") {
+        reject(
+          new Error(
+            `Port ${REDIRECT_PORT} is already in use. ` +
+              `Another auth flow may be running, or the port is occupied.`,
+          ),
+        );
+      } else {
+        reject(err);
+      }
+    });
+
     server.listen(REDIRECT_PORT, "0.0.0.0", () => {
       console.error(
-        `google-mcp: auth callback listening on 0.0.0.0:${REDIRECT_PORT}`,
+        `google-mcp: auth callback listening on 0.0.0.0:${REDIRECT_PORT} (redirect: ${REDIRECT_URI})`,
       );
     });
 

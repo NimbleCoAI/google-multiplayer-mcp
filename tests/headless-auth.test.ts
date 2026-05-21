@@ -75,6 +75,7 @@ vi.mock("http", async () => {
         if (cb) cb();
       }),
       close: vi.fn(),
+      on: vi.fn(),
     })),
   };
 });
