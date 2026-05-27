@@ -231,6 +231,53 @@ export function getDocsTools(
         return { documentId, appended: text.length };
       },
     });
+
+    tools.push({
+      name: "docs_batch_update",
+      description:
+        "Perform structural edits on a Google Doc: insert, delete, or replace text at specific positions; apply formatting; insert tables, page breaks, or section breaks; manage named ranges and headers/footers. Accepts an array of requests matching the Google Docs API batchUpdate format.",
+      service: "docs",
+      requiredAccess: "write",
+      inputSchema: {
+        type: "object",
+        required: ["documentId", "requests"],
+        properties: {
+          documentId: {
+            type: "string",
+            description: "The ID of the Google Doc.",
+          },
+          requests: {
+            type: "array",
+            items: { type: "object" },
+            description:
+              "Array of request objects per the Google Docs API batchUpdate spec. Common types: insertText, deleteContentRange, replaceAllText, updateTextStyle, insertTable, insertPageBreak, createNamedRange.",
+          },
+        },
+      },
+      handler: async (args) => {
+        const documentId = args.documentId as string;
+        const requests = args.requests as object[];
+
+        const meta = await drive.files.get({
+          fileId: documentId,
+          fields: "id, name, parents",
+          supportsAllDrives: true,
+        });
+
+        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+
+        const res = await docs.documents.batchUpdate({
+          documentId,
+          requestBody: { requests },
+        });
+
+        return {
+          documentId,
+          replies: res.data.replies ?? [],
+          writeControl: res.data.writeControl ?? null,
+        };
+      },
+    });
   }
 
   // ── Admin tools ──────────────────────────────────────────────────────────
