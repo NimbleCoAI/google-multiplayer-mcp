@@ -1,4 +1,4 @@
-# google-mcp
+# google multiplayer mcp
 
 OAuth-based Google Workspace MCP server for Hermes agents. Replaces `workspace-mcp` with per-agent permission enforcement.
 
