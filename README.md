@@ -29,7 +29,7 @@ mcp_servers:
   google:
     command: npx
     args:
-      - github:NimbleCoOrg/google-mcp
+      - github:NimbleCoAI/google-mcp
       - --config
       - /opt/data/google-permissions.yaml
     env:
