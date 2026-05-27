@@ -234,6 +234,53 @@ export function getSheetsTools(
         };
       },
     });
+
+    tools.push({
+      name: "sheets_batch_update",
+      description:
+        "Perform structural operations on a Google Spreadsheet: add/delete/rename sheets, formatting, data validation, protected ranges. Accepts an array of requests matching the Google Sheets API batchUpdate format.",
+      service: "sheets",
+      requiredAccess: "write",
+      inputSchema: {
+        type: "object",
+        required: ["spreadsheetId", "requests"],
+        properties: {
+          spreadsheetId: {
+            type: "string",
+            description: "The ID of the spreadsheet.",
+          },
+          requests: {
+            type: "array",
+            items: { type: "object" },
+            description:
+              "Array of request objects per the Google Sheets API batchUpdate spec. Common types: addSheet, updateSheetProperties, repeatCell, setDataValidation, addProtectedRange, autoResizeDimensions.",
+          },
+        },
+      },
+      handler: async (args) => {
+        const spreadsheetId = args.spreadsheetId as string;
+        const requests = args.requests as object[];
+
+        const meta = await drive.files.get({
+          fileId: spreadsheetId,
+          fields: "id, name, parents",
+          supportsAllDrives: true,
+        });
+
+        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+
+        const res = await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: { requests },
+        });
+
+        return {
+          spreadsheetId,
+          totalUpdatedSheets: res.data.replies?.length ?? 0,
+          replies: res.data.replies ?? [],
+        };
+      },
+    });
   }
 
   // ── Admin tools ──────────────────────────────────────────────────────────
