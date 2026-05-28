@@ -398,6 +398,150 @@ export function getDriveTools(
     });
 
     tools.push({
+      name: "drive_rename",
+      description: "Rename a file or folder in Google Drive.",
+      service: "drive",
+      requiredAccess: "write",
+      inputSchema: {
+        type: "object",
+        required: ["fileId", "newName"],
+        properties: {
+          fileId: {
+            type: "string",
+            description: "ID of the file or folder to rename.",
+          },
+          newName: {
+            type: "string",
+            description: "The new name for the file or folder.",
+          },
+        },
+      },
+      handler: async (args) => {
+        const fileId = args.fileId as string;
+        const newName = args.newName as string;
+
+        if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
+
+        const res = await drive.files.update({
+          fileId,
+          requestBody: { name: newName },
+          fields: "id, name, mimeType, parents, modifiedTime",
+          supportsAllDrives: true,
+        });
+
+        return res.data;
+      },
+    });
+
+    tools.push({
+      name: "drive_move",
+      description: "Move a file or folder to a different parent folder in Google Drive.",
+      service: "drive",
+      requiredAccess: "write",
+      inputSchema: {
+        type: "object",
+        required: ["fileId", "destinationFolderId"],
+        properties: {
+          fileId: {
+            type: "string",
+            description: "ID of the file or folder to move.",
+          },
+          destinationFolderId: {
+            type: "string",
+            description: "ID of the destination folder.",
+          },
+        },
+      },
+      handler: async (args) => {
+        const fileId = args.fileId as string;
+        const destinationFolderId = args.destinationFolderId as string;
+
+        if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
+
+        if (allowedFolders.length > 0 && !allowedFolders.includes(destinationFolderId)) {
+          if (!(await isWithinAllowedFolders(drive, destinationFolderId, allowedFolders))) {
+            throw new Error("Destination folder is outside allowed folders");
+          }
+        }
+
+        // Get current parents to remove them
+        const meta = await drive.files.get({
+          fileId,
+          fields: "parents",
+          supportsAllDrives: true,
+        });
+        const previousParents = (meta.data.parents ?? []).join(",");
+
+        const res = await drive.files.update({
+          fileId,
+          addParents: destinationFolderId,
+          removeParents: previousParents,
+          fields: "id, name, mimeType, parents, modifiedTime",
+          supportsAllDrives: true,
+        });
+
+        return res.data;
+      },
+    });
+
+    tools.push({
+      name: "drive_copy",
+      description: "Copy a file in Google Drive. Optionally specify a new name and destination folder.",
+      service: "drive",
+      requiredAccess: "write",
+      inputSchema: {
+        type: "object",
+        required: ["fileId"],
+        properties: {
+          fileId: {
+            type: "string",
+            description: "ID of the file to copy.",
+          },
+          name: {
+            type: "string",
+            description: "Name for the copy (defaults to 'Copy of <original>').",
+          },
+          folderId: {
+            type: "string",
+            description: "Destination folder ID for the copy.",
+          },
+        },
+      },
+      handler: async (args) => {
+        const fileId = args.fileId as string;
+        const name = args.name as string | undefined;
+        const folderId = args.folderId as string | undefined;
+
+        if (!(await isWithinAllowedFolders(drive, fileId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
+
+        if (folderId && allowedFolders.length > 0 && !allowedFolders.includes(folderId)) {
+          if (!(await isWithinAllowedFolders(drive, folderId, allowedFolders))) {
+            throw new Error("Destination folder is outside allowed folders");
+          }
+        }
+
+        const requestBody: Record<string, unknown> = {};
+        if (name) requestBody.name = name;
+        if (folderId) requestBody.parents = [folderId];
+
+        const res = await drive.files.copy({
+          fileId,
+          requestBody,
+          fields: "id, name, mimeType, parents, modifiedTime",
+          supportsAllDrives: true,
+        });
+
+        return res.data;
+      },
+    });
+
+    tools.push({
       name: "drive_update",
       description: "Update the content of an existing file in Google Drive.",
       service: "drive",
