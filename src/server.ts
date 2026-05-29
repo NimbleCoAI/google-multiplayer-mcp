@@ -118,11 +118,12 @@ export async function startServer(config: PermissionConfig): Promise<void> {
   let tools: ToolDef[] = [];
   try {
     tools = collectTools(config);
-  } catch {
+  } catch (e) {
     // Auth not configured — server starts with auth tools only so the
     // agent can trigger the OAuth flow from chat.
+    const detail = e instanceof Error ? e.message : String(e);
     console.error(
-      `google-mcp: no auth tokens for "${config.identity}" — ` +
+      `google-mcp: failed to load tools for "${config.identity}" (${detail}) — ` +
       `starting with auth tools only. Use google_auth_start to authenticate.`
     );
   }
