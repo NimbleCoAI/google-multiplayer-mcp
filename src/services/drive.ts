@@ -4,61 +4,14 @@ import { Readable } from "stream";
 import { google } from "googleapis";
 import type { PermissionConfig, ToolDef } from "../types.js";
 import { hasAccess } from "../types.js";
+import { getAllowedFolders } from "../permissions.js";
 import {
-  getAllowedFolders,
-  filterByFolders,
-} from "../permissions.js";
+  isWithinAllowedFolders,
+  resolveAllowedFolderTree,
+  invalidateFolderTreeCache,
+} from "./folder-scope.js";
 
 type AuthClient = InstanceType<typeof google.auth.OAuth2>;
-
-type DriveClient = ReturnType<typeof google.drive>;
-
-/**
- * Recursively check whether a file (by ID) lives anywhere within the allowed
- * folder trees, walking up the parent chain via the Drive API.
- *
- * This is the correct check for `drive_get`, `drive_download`, `drive_update`,
- * `drive_delete`, and `drive_share` — where the file may be in a subfolder of
- * an allowed folder, not just a direct child.
- *
- * @param drive       - Authenticated Drive API client
- * @param fileId      - ID of the file or folder to check
- * @param allowedFolders - Set of allowed root folder IDs
- * @param visited     - (internal) cache of already-resolved IDs to prevent cycles
- * @param depth       - (internal) recursion depth guard (max 10)
- */
-async function isWithinAllowedFolders(
-  drive: DriveClient,
-  fileId: string,
-  allowedFolders: string[],
-  visited: Set<string> = new Set(),
-  depth = 0,
-): Promise<boolean> {
-  if (allowedFolders.length === 0) return true;
-  if (depth > 10 || visited.has(fileId)) return false;
-  visited.add(fileId);
-
-  const meta = await drive.files.get({
-    fileId,
-    fields: "parents",
-    supportsAllDrives: true,
-  });
-
-  const parents = meta.data.parents ?? [];
-  if (parents.length === 0) return false;
-
-  // Direct match
-  if (parents.some((p) => allowedFolders.includes(p))) return true;
-
-  // Recurse up each parent
-  for (const parentId of parents) {
-    if (await isWithinAllowedFolders(drive, parentId, allowedFolders, visited, depth + 1)) {
-      return true;
-    }
-  }
-
-  return false;
-}
 
 /**
  * Returns an array of ToolDef objects for Google Drive, filtered by access level.
@@ -105,18 +58,25 @@ export function getDriveTools(
       const pageSize = (args.pageSize as number | undefined) ?? 50;
       const pageToken = args.pageToken as string | undefined;
 
+      // Resolve the full allowed folder tree (roots + all descendant folders).
+      // Empty set means "no restriction" (allowedFolders is empty).
+      const scoped = allowedFolders.length > 0;
+      const allowedTree = scoped
+        ? await resolveAllowedFolderTree(drive, allowedFolders)
+        : new Set<string>();
+
       // Build query
       let q = "trashed = false";
 
       if (folderId) {
-        // Verify requested folder is allowed
-        if (allowedFolders.length > 0 && !allowedFolders.includes(folderId)) {
+        // Verify requested folder is anywhere within the allowed tree.
+        if (scoped && !allowedTree.has(folderId)) {
           throw new Error(`Folder ${folderId} is not in allowed folders`);
         }
         q += ` and '${folderId}' in parents`;
-      } else if (allowedFolders.length > 0) {
-        // Restrict to all allowed folders
-        const folderClauses = allowedFolders
+      } else if (scoped) {
+        // Restrict to every folder in the allowed tree.
+        const folderClauses = [...allowedTree]
           .map((id) => `'${id}' in parents`)
           .join(" or ");
         q += ` and (${folderClauses})`;
@@ -135,7 +95,11 @@ export function getDriveTools(
         ...f,
         parents: f.parents ?? undefined,
       }));
-      const filtered = filterByFolders(files, allowedFolders);
+      // Post-filter by tree membership (a file is in scope if any parent is in
+      // the resolved tree). Cheap, in-memory — no extra API calls.
+      const filtered = scoped
+        ? files.filter((f) => f.parents?.some((p) => allowedTree.has(p)) ?? false)
+        : files;
 
       return {
         files: filtered,
@@ -224,14 +188,16 @@ export function getDriveTools(
       const query = args.query as string;
       const pageSize = (args.pageSize as number | undefined) ?? 20;
 
-      let q = `fullText contains '${query.replace(/'/g, "\\'")}' and trashed = false`;
+      // NOTE: deliberately do NOT add a per-folder OR-clause to the query.
+      // Drive's `q` has a length limit and the allowed tree can contain many
+      // folders; instead we post-filter results by tree membership. Search is
+      // already bounded by pageSize.
+      const q = `fullText contains '${query.replace(/'/g, "\\'")}' and trashed = false`;
 
-      if (allowedFolders.length > 0) {
-        const folderClauses = allowedFolders
-          .map((id) => `'${id}' in parents`)
-          .join(" or ");
-        q += ` and (${folderClauses})`;
-      }
+      const scoped = allowedFolders.length > 0;
+      const allowedTree = scoped
+        ? await resolveAllowedFolderTree(drive, allowedFolders)
+        : new Set<string>();
 
       const res = await drive.files.list({
         q,
@@ -245,7 +211,9 @@ export function getDriveTools(
         ...f,
         parents: f.parents ?? undefined,
       }));
-      const filtered = filterByFolders(files, allowedFolders);
+      const filtered = scoped
+        ? files.filter((f) => f.parents?.some((p) => allowedTree.has(p)) ?? false)
+        : files;
 
       return { files: filtered };
     },
@@ -331,7 +299,11 @@ export function getDriveTools(
         const mimeType = (args.mimeType as string | undefined) ?? "text/plain";
         const folderId = args.folderId as string | undefined;
 
-        if (folderId && allowedFolders.length > 0 && !allowedFolders.includes(folderId)) {
+        if (
+          folderId &&
+          allowedFolders.length > 0 &&
+          !(await isWithinAllowedFolders(drive, folderId, allowedFolders))
+        ) {
           throw new Error(`Folder ${folderId} is not in allowed folders`);
         }
 
@@ -376,7 +348,11 @@ export function getDriveTools(
         const name = args.name as string;
         const parentId = args.parentId as string | undefined;
 
-        if (parentId && allowedFolders.length > 0 && !allowedFolders.includes(parentId)) {
+        if (
+          parentId &&
+          allowedFolders.length > 0 &&
+          !(await isWithinAllowedFolders(drive, parentId, allowedFolders))
+        ) {
           throw new Error(`Folder ${parentId} is not in allowed folders`);
         }
 
@@ -392,6 +368,10 @@ export function getDriveTools(
           fields: "id, name, mimeType, parents",
           supportsAllDrives: true,
         });
+
+        // A new subfolder changes the allowed tree; drop the cache so the next
+        // discovery query sees it immediately.
+        invalidateFolderTreeCache();
 
         return res.data;
       },
@@ -484,6 +464,9 @@ export function getDriveTools(
           supportsAllDrives: true,
         });
 
+        // Moving an item (possibly a folder) restructures the tree.
+        invalidateFolderTreeCache();
+
         return res.data;
       },
     });
@@ -536,6 +519,9 @@ export function getDriveTools(
           fields: "id, name, mimeType, parents, modifiedTime",
           supportsAllDrives: true,
         });
+
+        // A copied folder adds new ids to the tree.
+        invalidateFolderTreeCache();
 
         return res.data;
       },

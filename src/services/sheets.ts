@@ -3,7 +3,8 @@
 import { google } from "googleapis";
 import type { PermissionConfig, ToolDef } from "../types.js";
 import { hasAccess } from "../types.js";
-import { getAllowedFolders, checkFolderAccess } from "../permissions.js";
+import { getAllowedFolders } from "../permissions.js";
+import { isWithinAllowedFolders } from "./folder-scope.js";
 
 type AuthClient = InstanceType<typeof google.auth.OAuth2>;
 
@@ -50,14 +51,10 @@ export function getSheetsTools(
       const spreadsheetId = args.spreadsheetId as string;
       const range = args.range as string | undefined;
 
-      // Check folder access via Drive API
-      const meta = await drive.files.get({
-        fileId: spreadsheetId,
-        fields: "id, name, parents",
-        supportsAllDrives: true,
-      });
-
-      checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+      // Check folder access via Drive API (recursive ancestor walk).
+      if (!(await isWithinAllowedFolders(drive, spreadsheetId, allowedFolders))) {
+        throw new Error("Item is outside allowed folders");
+      }
 
       if (range) {
         const res = await sheets.spreadsheets.values.get({
@@ -209,14 +206,10 @@ export function getSheetsTools(
         const range = args.range as string;
         const values = args.values as string[][];
 
-        // Check folder access via Drive API
-        const meta = await drive.files.get({
-          fileId: spreadsheetId,
-          fields: "id, name, parents",
-          supportsAllDrives: true,
-        });
-
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        // Check folder access via Drive API (recursive ancestor walk).
+        if (!(await isWithinAllowedFolders(drive, spreadsheetId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         const res = await sheets.spreadsheets.values.update({
           spreadsheetId,
@@ -261,13 +254,9 @@ export function getSheetsTools(
         const spreadsheetId = args.spreadsheetId as string;
         const requests = args.requests as object[];
 
-        const meta = await drive.files.get({
-          fileId: spreadsheetId,
-          fields: "id, name, parents",
-          supportsAllDrives: true,
-        });
-
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        if (!(await isWithinAllowedFolders(drive, spreadsheetId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         const res = await sheets.spreadsheets.batchUpdate({
           spreadsheetId,
@@ -304,14 +293,10 @@ export function getSheetsTools(
       handler: async (args) => {
         const spreadsheetId = args.spreadsheetId as string;
 
-        // Check folder access via Drive API
-        const meta = await drive.files.get({
-          fileId: spreadsheetId,
-          fields: "id, name, parents",
-          supportsAllDrives: true,
-        });
-
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        // Check folder access via Drive API (recursive ancestor walk).
+        if (!(await isWithinAllowedFolders(drive, spreadsheetId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         await drive.files.update({
           fileId: spreadsheetId,
