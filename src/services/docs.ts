@@ -3,7 +3,8 @@
 import { google } from "googleapis";
 import type { PermissionConfig, ToolDef } from "../types.js";
 import { hasAccess } from "../types.js";
-import { getAllowedFolders, checkFolderAccess } from "../permissions.js";
+import { getAllowedFolders } from "../permissions.js";
+import { isWithinAllowedFolders } from "./folder-scope.js";
 
 type AuthClient = InstanceType<typeof google.auth.OAuth2>;
 
@@ -63,14 +64,11 @@ export function getDocsTools(
     handler: async (args) => {
       const documentId = args.documentId as string;
 
-      // Check folder access via Drive API (Docs API doesn't expose parents)
-      const meta = await drive.files.get({
-        fileId: documentId,
-        fields: "id, name, parents",
-        supportsAllDrives: true,
-      });
-
-      checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+      // Check folder access via Drive API — recursive, so docs nested in
+      // subfolders of an allowed root are reachable, not just direct children.
+      if (!(await isWithinAllowedFolders(drive, documentId, allowedFolders))) {
+        throw new Error("Item is outside allowed folders");
+      }
 
       const res = await docs.documents.get({ documentId });
       const doc = res.data as Record<string, any>;
@@ -193,14 +191,10 @@ export function getDocsTools(
         const documentId = args.documentId as string;
         const text = args.text as string;
 
-        // Check folder access via Drive API
-        const meta = await drive.files.get({
-          fileId: documentId,
-          fields: "id, name, parents",
-          supportsAllDrives: true,
-        });
-
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        // Check folder access via Drive API (recursive ancestor walk).
+        if (!(await isWithinAllowedFolders(drive, documentId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         // Get current document to find end index
         const docRes = await docs.documents.get({ documentId });
@@ -258,13 +252,9 @@ export function getDocsTools(
         const documentId = args.documentId as string;
         const requests = args.requests as object[];
 
-        const meta = await drive.files.get({
-          fileId: documentId,
-          fields: "id, name, parents",
-          supportsAllDrives: true,
-        });
-
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        if (!(await isWithinAllowedFolders(drive, documentId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         const res = await docs.documents.batchUpdate({
           documentId,
@@ -301,14 +291,10 @@ export function getDocsTools(
       handler: async (args) => {
         const documentId = args.documentId as string;
 
-        // Check folder access via Drive API
-        const meta = await drive.files.get({
-          fileId: documentId,
-          fields: "id, name, parents",
-          supportsAllDrives: true,
-        });
-
-        checkFolderAccess(meta.data.parents ?? [], allowedFolders);
+        // Check folder access via Drive API (recursive ancestor walk).
+        if (!(await isWithinAllowedFolders(drive, documentId, allowedFolders))) {
+          throw new Error("Item is outside allowed folders");
+        }
 
         await drive.files.update({
           fileId: documentId,

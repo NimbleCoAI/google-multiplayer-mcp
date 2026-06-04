@@ -83,40 +83,13 @@ export function checkAccess(
 }
 
 /**
- * Check that a target item's direct parents are within allowed folders.
- * Throws if no direct parent is in the allowed list.
- * No-op if allowedFolders is empty (no restriction).
- *
- * NOTE: This only checks direct parents — it does NOT walk the full ancestor
- * chain. For deep folder tree checks (files inside subfolders of allowed
- * folders), use `isWithinAllowedFolders` in `src/services/drive.ts`, which
- * recursively walks parents via the Drive API. This function is used only for
- * list-result filtering where items are already direct children of queried
- * folders.
- */
-export function checkFolderAccess(
-  itemParents: string[] | undefined,
-  allowedFolders: string[],
-): void {
-  if (allowedFolders.length === 0) return;
-  if (!itemParents || itemParents.length === 0) {
-    throw new Error("Item has no parent folder — cannot verify folder access");
-  }
-  const allowed = itemParents.some((p) => allowedFolders.includes(p));
-  if (!allowed) {
-    throw new Error("Item is outside allowed folders");
-  }
-}
-
-/**
  * Filter a list of items to only those whose direct parents are in allowed folders.
  * Returns all items if allowedFolders is empty.
  *
- * NOTE: This checks direct parents only. When using Drive API's `q` parameter
- * with `'folderId' in parents`, items returned are already direct children of
- * the queried folder, so this filter is correct for list results. For access
- * checks on arbitrary files (which may be in nested subfolders), use
- * `isWithinAllowedFolders` in `src/services/drive.ts` instead.
+ * NOTE: This is a low-level, direct-parent-only helper. Folder scoping for
+ * Drive/Docs/Sheets now goes through `src/services/folder-scope.ts`, which
+ * resolves the full descendant tree (`resolveAllowedFolderTree`) and walks
+ * ancestor chains (`isWithinAllowedFolders`) so nested subfolders are in scope.
  */
 export function filterByFolders<T extends { parents?: string[] }>(
   items: T[],
