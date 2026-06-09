@@ -1,10 +1,10 @@
 {
-  "name": "google-mcp",
+  "name": "google-multiplayer-mcp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "google-mcp": "dist/index.js"
+    "google-multiplayer-mcp": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
