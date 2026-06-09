@@ -7,7 +7,13 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { PermissionConfig, ToolDef } from "./types.js";
-import { createAuthClient, startHeadlessAuth, checkAuthStatus } from "./auth.js";
+import {
+  createAuthClient,
+  startHeadlessAuth,
+  checkAuthStatus,
+  generateConsentUrl,
+  exchangeCode,
+} from "./auth.js";
 import { getDriveTools } from "./services/drive.js";
 import { getCalendarTools } from "./services/calendar.js";
 import { getGmailTools } from "./services/gmail.js";
@@ -35,8 +41,88 @@ interface AuthToolDef {
   handler: (args: Record<string, unknown>) => Promise<{ type: "text"; text: string }[]>;
 }
 
-function getAuthTools(identity: string): AuthToolDef[] {
+export function getAuthTools(identity: string): AuthToolDef[] {
   return [
+    {
+      name: "google_auth_url",
+      description:
+        "Get the Google OAuth consent URL for the paste-code re-auth flow " +
+        "(remote/Signal). Send this URL to the user; they open it on their " +
+        "phone, consent, then copy the `code=…` value from the redirected URL " +
+        "and paste it back. Pass that code to google_auth_exchange. Use this " +
+        "instead of google_auth_start when there is no reachable callback " +
+        "server (e.g. the agent runs on a remote host).",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+        required: [],
+      },
+      handler: async () => {
+        const url = generateConsentUrl(identity);
+        return [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "auth_required",
+              url,
+              message:
+                "Send this URL to the user. After they consent, they copy the " +
+                "`code=…` value from the redirected URL (the page may show an " +
+                "error — that's fine) and paste it back. Then call " +
+                "google_auth_exchange with that code.",
+            }),
+          },
+        ];
+      },
+    },
+    {
+      name: "google_auth_exchange",
+      description:
+        "Exchange a pasted Google OAuth authorization code (from google_auth_url) " +
+        "for tokens and save them. On success the MCP must be reloaded " +
+        "(HSM quick-restart) before the Google tools work again.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          code: {
+            type: "string",
+            description:
+              "The authorization code the user pasted (the `code=…` value " +
+              "from the redirected URL).",
+          },
+        },
+        required: ["code"],
+      },
+      handler: async (args) => {
+        const code = typeof args.code === "string" ? args.code.trim() : "";
+        try {
+          const { email } = await exchangeCode(identity, code);
+          return [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "authenticated",
+                email,
+                message:
+                  `Authenticated as ${email}. Reload the MCP (HSM quick-restart) ` +
+                  "to activate the Google tools.",
+              }),
+            },
+          ];
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "error",
+                message: `Code exchange failed: ${message}`,
+              }),
+            },
+          ];
+        }
+      },
+    },
     {
       name: "google_auth_start",
       description:
@@ -123,14 +209,14 @@ export async function startServer(config: PermissionConfig): Promise<void> {
     // agent can trigger the OAuth flow from chat.
     const detail = e instanceof Error ? e.message : String(e);
     console.error(
-      `google-mcp: failed to load tools for "${config.identity}" (${detail}) — ` +
+      `google-multiplayer-mcp: failed to load tools for "${config.identity}" (${detail}) — ` +
       `starting with auth tools only. Use google_auth_start to authenticate.`
     );
   }
   const authTools = getAuthTools(config.identity);
 
   const server = new Server(
-    { name: "google-mcp", version: "0.1.0" },
+    { name: "google-multiplayer-mcp", version: "0.1.0" },
     { capabilities: { tools: {} } },
   );
 

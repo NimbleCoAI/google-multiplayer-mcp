@@ -1,4 +1,4 @@
-/** Shared types for google-mcp server. */
+/** Shared types for google-multiplayer-mcp server. */
 
 export type ServiceName = "drive" | "calendar" | "gmail" | "docs" | "sheets";
 

@@ -90,7 +90,7 @@ export function createAuthClient(
   const tokens = loadTokens(identity);
   if (!tokens?.refresh_token) {
     throw new Error(
-      `No tokens for identity "${identity}". Run: google-mcp auth ${identity}`,
+      `No tokens for identity "${identity}". Run: google-multiplayer-mcp auth ${identity}`,
     );
   }
 
@@ -293,6 +293,56 @@ export async function runHeadlessAuthFlow(identity: string): Promise<void> {
   console.log(`\nConnected as ${userInfo.data.email ?? "unknown"}`);
 }
 
+// ─── Paste-code auth (remote / headless, no callback server) ──────
+
+/**
+ * Generate the OAuth consent URL for an identity WITHOUT starting a callback
+ * server. Used for the paste-code flow: the user opens the URL on their phone,
+ * consents, and pastes the resulting `code=…` back through Signal. Reachability
+ * of the redirect URI doesn't matter — only the code in the URL bar does.
+ */
+export function generateConsentUrl(identity: string): string {
+  const config = loadGlobalConfig();
+  const client = new google.auth.OAuth2(
+    config.clientId,
+    config.clientSecret,
+    REDIRECT_URI,
+  );
+  return client.generateAuthUrl({
+    access_type: "offline",
+    scope: SCOPES,
+    prompt: "consent",
+    // Bind the URL to the identity so a stray paste can't auth the wrong account
+    state: identity,
+  });
+}
+
+/**
+ * Exchange a pasted authorization code for tokens and persist them. Stateless —
+ * a fresh client per call, using the agent's own GOOGLE_CLIENT_ID/SECRET. After
+ * this succeeds the MCP must be reloaded (HSM quick-restart) so the in-memory
+ * client picks up the new token from disk.
+ */
+export async function exchangeCode(
+  identity: string,
+  code: string,
+): Promise<{ email: string }> {
+  const config = loadGlobalConfig();
+  const client = new google.auth.OAuth2(
+    config.clientId,
+    config.clientSecret,
+    REDIRECT_URI,
+  );
+
+  const { tokens } = await client.getToken(code);
+  saveTokens(identity, tokens as TokenSet);
+
+  client.setCredentials(tokens);
+  const oauth2 = google.oauth2({ version: "v2", auth: client });
+  const userInfo = await oauth2.userinfo.get();
+  return { email: userInfo.data.email ?? "unknown" };
+}
+
 // ─── MCP tool helpers ─────────────────────────────────────────────
 
 /**
@@ -368,7 +418,7 @@ export function startHeadlessAuth(identity: string): {
 
     server.listen(REDIRECT_PORT, "0.0.0.0", () => {
       console.error(
-        `google-mcp: auth callback listening on 0.0.0.0:${REDIRECT_PORT} (redirect: ${REDIRECT_URI})`,
+        `google-multiplayer-mcp: auth callback listening on 0.0.0.0:${REDIRECT_PORT} (redirect: ${REDIRECT_URI})`,
       );
     });
 

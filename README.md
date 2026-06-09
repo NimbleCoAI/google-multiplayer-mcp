@@ -16,8 +16,8 @@ OAuth-based Google Workspace MCP server for Hermes agents. Replaces `workspace-m
 2. Authenticate each identity:
 
 ```bash
-npx google-mcp auth personal
-npx google-mcp auth frontdoor
+npx google-multiplayer-mcp auth personal
+npx google-multiplayer-mcp auth frontdoor
 ```
 
 3. Create a permission config for each agent (see `examples/`).
@@ -55,6 +55,6 @@ volumes:
 ## Auth Commands
 
 ```bash
-google-mcp auth <identity>   # OAuth flow (opens browser)
-google-mcp auth status        # Show all identities
+google-multiplayer-mcp auth <identity>   # OAuth flow (opens browser)
+google-multiplayer-mcp auth status        # Show all identities
 ```
