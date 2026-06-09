@@ -6,7 +6,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { PermissionConfig, ToolDef } from "./types.js";
+import { formatToolError } from "./auth-errors.js";
 import {
   createAuthClient,
   startHeadlessAuth,
@@ -34,11 +36,69 @@ export function collectTools(config: PermissionConfig): ToolDef[] {
 
 // ─── Auth MCP tool definitions ──────────────────────────────────
 
-interface AuthToolDef {
+export interface AuthToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   handler: (args: Record<string, unknown>) => Promise<{ type: "text"; text: string }[]>;
+}
+
+/**
+ * Central tool-call dispatcher. Routes a tool call to the matching auth tool
+ * or service tool and normalises the result/error shape.
+ *
+ * Service-tool failures are wrapped by `formatToolError`, so an expired or
+ * revoked Google grant surfaces to the agent as a structured `auth_expired`
+ * payload (with the recovery action) instead of a raw googleapis stack trace.
+ * This is the single place errors are wrapped — service handlers stay free to
+ * just `throw`.
+ */
+export async function dispatchToolCall(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  tools: ToolDef[],
+  authTools: AuthToolDef[],
+): Promise<CallToolResult> {
+  // Auth tools first — these manage the auth flow itself and own their error
+  // shape, so they are not run through the auth-expired wrapper.
+  const authTool = authTools.find((t) => t.name === name);
+  if (authTool) {
+    try {
+      const content = await authTool.handler(args ?? {});
+      return { content };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) {
+    return {
+      content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
+      isError: true,
+    };
+  }
+
+  try {
+    const result = await tool.handler(args ?? {});
+    return {
+      content: [
+        { type: "text" as const, text: JSON.stringify(result, null, 2) },
+      ],
+    };
+  } catch (err: unknown) {
+    const payload = formatToolError(err);
+    return {
+      content: [
+        { type: "text" as const, text: JSON.stringify(payload, null, 2) },
+      ],
+      isError: true,
+    };
+  }
 }
 
 export function getAuthTools(identity: string): AuthToolDef[] {
@@ -236,51 +296,11 @@ export async function startServer(config: PermissionConfig): Promise<void> {
     ],
   }));
 
-  // Call tool — route to the correct handler
+  // Call tool — route through the central dispatcher (wraps auth-expired
+  // errors into a structured, actionable payload).
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-
-    // Check auth tools first
-    const authTool = authTools.find((t) => t.name === name);
-    if (authTool) {
-      try {
-        const content = await authTool.handler(args ?? {});
-        return { content };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${message}` }],
-          isError: true,
-        };
-      }
-    }
-
-    const tool = tools.find((t) => t.name === name);
-
-    if (!tool) {
-      return {
-        content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
-        isError: true,
-      };
-    }
-
-    try {
-      const result = await tool.handler(args ?? {});
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: "text" as const, text: `Error: ${message}` }],
-        isError: true,
-      };
-    }
+    return dispatchToolCall(name, args, tools, authTools);
   });
 
   const transport = new StdioServerTransport();
