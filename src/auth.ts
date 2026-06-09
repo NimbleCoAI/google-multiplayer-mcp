@@ -337,10 +337,18 @@ export async function exchangeCode(
   const { tokens } = await client.getToken(code);
   saveTokens(identity, tokens as TokenSet);
 
+  // The token is saved — auth has succeeded. The email lookup is best-effort:
+  // our scopes (drive/calendar/gmail/docs/sheets) don't grant openid/email, so
+  // userinfo.get() can fail with "missing required authentication credential".
+  // A failure here must NOT fail the exchange.
   client.setCredentials(tokens);
-  const oauth2 = google.oauth2({ version: "v2", auth: client });
-  const userInfo = await oauth2.userinfo.get();
-  return { email: userInfo.data.email ?? "unknown" };
+  try {
+    const oauth2 = google.oauth2({ version: "v2", auth: client });
+    const userInfo = await oauth2.userinfo.get();
+    return { email: userInfo.data.email ?? "unknown" };
+  } catch {
+    return { email: "unknown" };
+  }
 }
 
 // ─── MCP tool helpers ─────────────────────────────────────────────
